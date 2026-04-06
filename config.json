@@ -1,0 +1,25 @@
+{
+  "azure_openai_endpoint": "https://qa-openai-demo-gp.openai.azure.com/",
+  "azure_openai_key": "",
+  "azure_openai_deployment": "gpt-4o-mini",
+
+  "ado_org": "MyGainwell",
+  "ado_project": "Cost%20Containment%20and%20Care%20Quality%20(CC)",
+  "ado_pat": "",
+
+  "ado_test_plan_id": null,
+  "ado_test_suite_id": null,
+  "ado_parent_static_suite_id": null,
+  "ado_create_suite_per_user_story": true,
+  "ado_skip_if_suite_has_testcases": true,
+  "ado_link_testcases_to_user_story": true,
+  "ado_tested_by_relation_type": null,
+  "ado_test_configuration_ids": [],
+  "azure_openai_ca_bundle_path": null,
+  "insecure_skip_tls_verify": true,
+ 
+  "ado_test_configuration_names": ["Windows 10"],
+  "ado_testcase_fields": {
+    "Custom.AIAugmentedTestCaseNEW": "Yes"
+  } 
+}

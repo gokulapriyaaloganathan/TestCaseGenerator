@@ -1,5 +1,2 @@
 requests
-openai
 gradio
-pypdf
-matplotlib
