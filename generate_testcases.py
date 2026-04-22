@@ -1,9 +1,11 @@
 import base64
 import json
+import os
 import re
 import sys
 import textwrap
 import xml.etree.ElementTree as ET
+import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 from string import Template
@@ -98,7 +100,8 @@ def _azure_openai_raw_ping(
 def load_prompt_template(path: Path = PROMPT_TEMPLATE_PATH) -> str:
     """Load the user prompt template from a file.
 
-    The template uses $DESCRIPTION and $ACCEPTANCE_CRITERIA placeholders.
+    The template uses $DESCRIPTION, $ACCEPTANCE_CRITERIA, and
+    optional $USER_GUIDES_CONTEXT placeholders.
     """
 
     try:
@@ -1197,6 +1200,142 @@ def _testcases_include_sql_queries(testcases: List[Dict[str, Any]]) -> bool:
     return False
 
 
+def _extract_text_from_docx(path: Path) -> str:
+    try:
+        with zipfile.ZipFile(path) as zf:
+            with zf.open("word/document.xml") as doc_xml:
+                xml_bytes = doc_xml.read()
+    except Exception:
+        return ""
+
+    try:
+        root = ET.fromstring(xml_bytes)
+    except Exception:
+        return ""
+
+    parts: List[str] = []
+    for element in root.iter():
+        if element.tag.endswith("}t") and element.text:
+            value = element.text.strip()
+            if value:
+                parts.append(value)
+    return "\n".join(parts).strip()
+
+
+def _extract_text_from_pdf(path: Path) -> str:
+    try:
+        from pypdf import PdfReader  # type: ignore
+    except Exception:
+        return ""
+
+    try:
+        reader = PdfReader(str(path))
+    except Exception:
+        return ""
+
+    chunks: List[str] = []
+    for page in reader.pages:
+        try:
+            text = (page.extract_text() or "").strip()
+        except Exception:
+            text = ""
+        if text:
+            chunks.append(text)
+
+    return "\n\n".join(chunks).strip()
+
+
+def _extract_user_guide_text(path: Path) -> str:
+    suffix = path.suffix.lower()
+
+    if suffix == ".docx":
+        return _extract_text_from_docx(path)
+
+    if suffix == ".pdf":
+        return _extract_text_from_pdf(path)
+
+    try:
+        text = path.read_text(encoding="utf-8", errors="ignore").strip()
+    except Exception:
+        return ""
+
+    if not text or "\x00" in text:
+        return ""
+    return text
+
+
+def build_user_guides_context_from_files(
+    uploaded_files: Optional[List[Any]],
+    *,
+    max_chars: int = 20000,
+) -> Tuple[str, List[str], List[str]]:
+    """Build prompt context from uploaded user-guide files.
+
+    Returns (context_text, included_filenames, skipped_filenames).
+    """
+
+    if not uploaded_files:
+        return "", [], []
+
+    included: List[str] = []
+    skipped: List[str] = []
+    snippets: List[str] = []
+    readable: List[Tuple[str, str]] = []
+    total_chars = 0
+
+    for item in uploaded_files:
+        file_path = ""
+        if isinstance(item, str):
+            file_path = item
+        elif hasattr(item, "name"):
+            file_path = str(getattr(item, "name") or "")
+        elif isinstance(item, dict) and item.get("name"):
+            file_path = str(item.get("name") or "")
+
+        if not file_path:
+            skipped.append("(unknown)")
+            continue
+
+        filename = os.path.basename(file_path)
+        text = _extract_user_guide_text(Path(file_path))
+        if not text:
+            skipped.append(filename)
+            continue
+
+        readable.append((filename, text))
+
+    if not readable:
+        return "", included, skipped
+
+    max_files = min(8, len(readable))
+    selected = readable[:max_files]
+    not_included = readable[max_files:]
+
+    # Reserve budget across selected files so one large guide does not dominate.
+    per_file_limit = max(1200, min(4000, max_chars // max(1, len(selected))))
+
+    for filename, text in selected:
+        remaining = max_chars - total_chars
+        if remaining <= 0:
+            skipped.append(f"{filename} (not included: prompt size limit)")
+            continue
+
+        take = min(len(text), per_file_limit, remaining)
+        snippet = text[:take]
+        if take < len(text):
+            snippet += "\n...[truncated]"
+
+        snippets.append(f"### {filename}\n{snippet}")
+        total_chars += len(snippet)
+        included.append(filename)
+
+    for filename, _ in not_included:
+        skipped.append(f"{filename} (not included: prompt size limit)")
+
+    context = "\n\n".join(snippets).strip()
+    return context, included, skipped
+
+
 def generate_testcases_with_azure_openai(
     *,
     endpoint: str,
@@ -1204,6 +1343,7 @@ def generate_testcases_with_azure_openai(
     deployment: str,
     description: str,
     acceptance_criteria: str,
+    user_guides_context: str = "",
     prompt_template_path: Optional[Path] = None,
     ca_bundle_path: Optional[str] = None,
     insecure_skip_tls_verify: bool = False,
@@ -1228,6 +1368,7 @@ def generate_testcases_with_azure_openai(
         {
             "DESCRIPTION": description,
             "ACCEPTANCE_CRITERIA": acceptance_criteria,
+            "USER_GUIDES_CONTEXT": user_guides_context.strip() if user_guides_context else "No user guide content uploaded.",
         }
     )
     user_prompt = textwrap.dedent(user_prompt).strip()
@@ -1431,6 +1572,7 @@ def run_for_user_story(
     work_item_id: int,
     plan_id: Optional[int] = None,
     parent_suite_id: Optional[int] = None,
+    user_guides_context: str = "",
     config_path: Optional[Path] = None,
     prompt_template_path: Optional[Path] = None,
     quiet: bool = True,
@@ -1614,6 +1756,7 @@ def run_for_user_story(
         deployment=config.azure_openai_deployment,
         description=description,
         acceptance_criteria=acceptance,
+        user_guides_context=user_guides_context,
         prompt_template_path=prompt_template_path,
         ca_bundle_path=config.azure_openai_ca_bundle_path,
         insecure_skip_tls_verify=config.insecure_skip_tls_verify,

@@ -2,11 +2,11 @@ You are a QA engineer generating Azure DevOps test cases.
 
 Goal:
 - Create high-quality, executable test cases from the user story.
-- Cover positive, negative, and boundary value analysis (BVA) scenarios.
+- Cover positive, negative,boundary value analysis (BVA)  and equivalance partitioning
 - If the story is DB related, include SQL validation steps/queries.
 
 Critical output rules:
-1. Return ONLY a valid JSON array. No markdown, no explanation, no code fences.
+1. Return ONLY a valid JSON array.
 2. Use this exact schema for every object:
    - "title": string
    - "steps": array of strings
@@ -21,7 +21,6 @@ Critical output rules:
 10. For DB-related stories, every test case must include at least one explicit SQL query step (SELECT/INSERT/UPDATE/DELETE) with concrete query text.
 
 Coverage expectations:
-- Include tests for all acceptance criteria.
 - Include invalid input and error handling scenarios.
 - Include boundary values for numeric/date/text limits when applicable.
 - Include role/permission scenarios when applicable.
@@ -34,10 +33,18 @@ $DESCRIPTION
 ACCEPTANCE CRITERIA:
 $ACCEPTANCE_CRITERIA
 
+USER GUIDES (uploaded in UI):
+$USER_GUIDES_CONTEXT
+
+Guide usage rules:
+- Use USER GUIDES to inferor domain workflows, business validations, and expected outcomes.
+- If guide content conflicts with Description/Acceptance Criteria, prioritize Description/Acceptance Criteria.
+- When guide content is provided, include relevant guide-driven scenarios in positive, negative, and boundary tests.
+- Include the navigation steps as well if mentioned in the user story
 Return JSON in exactly this structure:
 [
   {
-    "title": "TC01 - Test case title",
+    "title": "TC01 -<Module Name like PP or CP or UM > Test case title",
     "steps": [
       "Step 1 action",
       "Step 2 action",

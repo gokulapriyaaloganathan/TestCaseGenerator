@@ -9,6 +9,7 @@ from generate_testcases import (
     AzureOpenAIError,
     ConfigurationError,
     _parse_work_item_ids,
+    build_user_guides_context_from_files,
     run_for_user_story,
 )
 
@@ -21,6 +22,7 @@ def _run_ado_testcase_generation(
     user_story_ids: str,
     plan_id: str,
     parent_suite_id: str,
+    user_guides_files,
 ) -> str:
     user_story_ids = (user_story_ids or "").strip()
     if not user_story_ids:
@@ -28,6 +30,8 @@ def _run_ado_testcase_generation(
 
     plan_value: Optional[int] = None
     raw_plan = (plan_id or "").strip()
+    if not raw_plan:
+        return "Plan ID is mandatory."
     if raw_plan:
         try:
             plan_value = int(raw_plan)
@@ -36,6 +40,8 @@ def _run_ado_testcase_generation(
 
     parent_value: Optional[int] = None
     raw_parent = (parent_suite_id or "").strip()
+    if not raw_parent:
+        return "Parent Suite ID is mandatory."
     if raw_parent:
         try:
             parent_value = int(raw_parent)
@@ -48,6 +54,21 @@ def _run_ado_testcase_generation(
         return "Invalid User Story IDs. Example: 12345 or 12345, 12346"
 
     lines = ["ADO Test Case Generation", RUN_SUMMARY_SEPARATOR]
+
+    guides_context, included_guides, skipped_guides = build_user_guides_context_from_files(
+        user_guides_files if isinstance(user_guides_files, list) else ([user_guides_files] if user_guides_files else [])
+    )
+    if included_guides:
+        lines.append(
+            "User guides considered: "
+            + ", ".join(included_guides)
+        )
+    else:
+        lines.append("User guides considered: none")
+    if skipped_guides:
+        lines.append("Skipped guide files: " + ", ".join(skipped_guides))
+    lines.append(RUN_SUMMARY_SEPARATOR)
+
     failures = 0
     total_created = 0
 
@@ -58,6 +79,7 @@ def _run_ado_testcase_generation(
                 work_item_id=work_item_id,
                 plan_id=plan_value,
                 parent_suite_id=parent_value,
+                user_guides_context=guides_context,
                 quiet=True,
             )
         except ConfigurationError as ex:
@@ -114,18 +136,20 @@ def _run_selected_generator(
     user_story_ids: str,
     plan_id: str,
     parent_suite_id: str,
+    user_guides_files,
 ) -> str:
     if generator_type != ADO_MODE:
         return "Please select a valid generator type."
-    return _run_ado_testcase_generation(user_story_ids, plan_id, parent_suite_id)
+    return _run_ado_testcase_generation(user_story_ids, plan_id, parent_suite_id, user_guides_files)
 
 
-def _clear_all_fields() -> tuple[str, str, str, str, str]:
+def _clear_all_fields() -> tuple[str, str, str, str, None, str]:
     return (
         ADO_MODE,
         "",
         "",
         "",
+        None,
         "",
     )
 
@@ -146,16 +170,24 @@ def create_ui() -> gr.Blocks:
                     label="User Story ID(s)",
                     placeholder="e.g. 12345 or 12345, 12346",
                     lines=1,
+                    elem_id="user_story_ids",
                 )
                 plan_id = gr.Textbox(
                     label="Plan ID",
                     placeholder="",
                     lines=1,
+                    elem_id="plan_id",
                 )
                 parent_suite_id = gr.Textbox(
                     label="Parent Suite ID",
                     placeholder="",
                     lines=1,
+                    elem_id="parent_suite_id",
+                )
+                user_guides_files = gr.File(
+                    label="Upload User Guides Folder",
+                    file_count="directory",
+                    type="filepath",
                 )
 
                 with gr.Row():
@@ -167,14 +199,14 @@ def create_ui() -> gr.Blocks:
 
         generate_button.click(
             _run_selected_generator,
-            inputs=[generator_type, user_story_ids, plan_id, parent_suite_id],
+            inputs=[generator_type, user_story_ids, plan_id, parent_suite_id, user_guides_files],
             outputs=[output],
         )
 
         clear_button.click(
             _clear_all_fields,
             inputs=[],
-            outputs=[generator_type, user_story_ids, plan_id, parent_suite_id, output],
+            outputs=[generator_type, user_story_ids, plan_id, parent_suite_id, user_guides_files, output],
         )
 
     return demo
@@ -182,7 +214,15 @@ def create_ui() -> gr.Blocks:
 
 def main() -> None:
     app = create_ui()
-    app.launch(theme=gr.themes.Default())
+    app.launch(
+        theme=gr.themes.Default(),
+        css=(
+            "#user_story_ids label > span::after,"
+            "#plan_id label > span::after,"
+            "#parent_suite_id label > span::after"
+            " { content: ' *'; color: #dc2626; font-weight: 700; }"
+        ),
+    )
 
 
 if __name__ == "__main__":
